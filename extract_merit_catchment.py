@@ -98,6 +98,7 @@ import matplotlib.pyplot as plt
 import geopandas as gpd
 import pandas as pd
 import numpy as np
+from pyproj import Transformer
 from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely.ops import unary_union
 
@@ -120,6 +121,10 @@ DEFAULT_AREA_EPSG = 6933  # 面积计算投影坐标系（等面积投影）
 DEFAULT_DISTANCE_EPSG = 3857  # 距离计算投影坐标系（Web墨卡托）
 DEFAULT_MEMORY_CHECK_INTERVAL = 50  # 内存检查间隔（处理多少个站点）
 DEFAULT_MEMORY_THRESHOLD = 85.0  # 内存使用率警戒线（%）
+
+
+# 预先构建坐标转换器，避免重复创建 Transformer
+WGS84_TO_DISTANCE = Transformer.from_crs(4326, DEFAULT_DISTANCE_EPSG, always_xy=True)
 
 
 # ========= 配置管理 =========
@@ -426,16 +431,13 @@ def pick_nearest_reach(
         ... )
         >>> print(f"选中河段: {comid}, 距离: {dist:.1f}m")
     """
-    # 将点投影到Web Mercator进行距离计算
-    pt_m = gpd.GeoDataFrame(
-        geometry=[Point(lon, lat)],
-        crs=4326
-    ).to_crs(DEFAULT_DISTANCE_EPSG)
-    pt = pt_m.geometry.iloc[0]
+    # 使用预构建的Transformer将点投影到Web Mercator
+    x, y = WGS84_TO_DISTANCE.transform(lon, lat)
+    pt = Point(x, y)
 
     # 使用空间索引快速查询候选河段
     sidx = gdf_riv_m.sindex
-    buffer_bounds = pt.buffer(SNAP_DIST_M).bounds
+    buffer_bounds = (x - SNAP_DIST_M, y - SNAP_DIST_M, x + SNAP_DIST_M, y + SNAP_DIST_M)
     cand_idx = list(sidx.intersection(buffer_bounds))
 
     if not cand_idx:
@@ -1159,8 +1161,8 @@ def process_one_site(
     area_target_m2: float,
     gdf_riv_m: gpd.GeoDataFrame,
     gdf_riv_wgs84: gpd.GeoDataFrame,
-    gdf_cat: gpd.GeoDataFrame,
-    gdf_cat_area: gpd.GeoDataFrame,
+    gdf_cat_indexed: gpd.GeoDataFrame,
+    gdf_cat_area_indexed: gpd.GeoDataFrame,
     china_prov: gpd.GeoDataFrame,
     G: Dict[int, Set[int]]
 ) -> Dict[str, Any]:
@@ -1264,13 +1266,25 @@ def process_one_site(
             }
 
         # ========= 3. 提取对应的单元流域 =========
-        sel = gdf_cat[gdf_cat["COMID"].isin(visited)].copy()
-        if sel.empty:
+        visited_list = list(visited)
+        available_ids = [cid for cid in visited_list if cid in gdf_cat_indexed.index]
+
+        if not available_ids:
             return {
                 "code": code,
                 "status": "fail",
                 "msg": "单元流域未匹配到任何COMID"
             }
+
+        missing_ids = set(visited_list) - set(available_ids)
+        if missing_ids:
+            return {
+                "code": code,
+                "status": "fail",
+                "msg": f"单元流域缺失 {len(missing_ids)} 个COMID"
+            }
+
+        sel = gdf_cat_indexed.loc[available_ids].copy()
 
         # ========= 4. 修复版流域合并 (Fixed Watershed Merging) =========
         # 问题: MERIT-Basins单元流域间存在微小拓扑间隙，直接unary_union会产生小窟窿
@@ -1297,9 +1311,8 @@ def process_one_site(
 
         # ========= 5. 计算面积 =========
         # 使用预投影数据（性能优化）
-        sel_area = gdf_cat_area[gdf_cat_area["COMID"].isin(visited)]
-        cat_area_geom = unary_union(sel_area.geometry.values)
-        area_m2 = float(gpd.GeoSeries([cat_area_geom], crs=AREA_EPSG).area.sum())
+        sel_area = gdf_cat_area_indexed.loc[available_ids]
+        area_m2 = float(sel_area.geometry.area.sum())
 
         # ========= 6. 面积验证 =========
         rel_err = None
@@ -1668,6 +1681,8 @@ def main() -> None:
     log("[2/8] 读取河网/单元流域/省界 ...")
     gdf_riv = ensure_wgs84(gpd.read_file(riv_shp))
     gdf_cat = ensure_wgs84(gpd.read_file(cat_shp))
+    if gdf_cat.index.name != "COMID":
+        gdf_cat = gdf_cat.set_index("COMID", drop=False)
     china_prov = ensure_wgs84(gpd.read_file(china_prov_shp))
 
     # 验证必需字段
@@ -1683,6 +1698,8 @@ def main() -> None:
     log("[3/8] 🚀 预计算投影数据 (减少重复转换) ...")
     gdf_riv_m = gdf_riv.to_crs(DEFAULT_DISTANCE_EPSG)  # 用于距离计算
     gdf_cat_area = gdf_cat.to_crs(AREA_EPSG)  # 用于面积计算
+    if gdf_cat_area.index.name != "COMID":
+        gdf_cat_area = gdf_cat_area.set_index("COMID", drop=False)
     log(f"    完成: 河网→EPSG:{DEFAULT_DISTANCE_EPSG}, 单元流域→EPSG:{AREA_EPSG}")
 
     # ========= [4/8] 构建拓扑 =========
