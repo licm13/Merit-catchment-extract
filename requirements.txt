@@ -1,0 +1,26 @@
+# Core dependencies for MERIT-Basins Watershed Extraction Tool
+
+# Geospatial data processing
+geopandas>=0.12.0
+shapely>=2.0.0
+
+# Data manipulation and analysis
+pandas>=1.5.0
+numpy>=1.23.0
+openpyxl>=3.0.0  # For Excel file support
+
+# Visualization
+matplotlib>=3.5.0
+
+# Configuration (optional but recommended)
+pyyaml>=6.0
+
+# Progress bar (optional but recommended)
+tqdm>=4.64.0
+
+# Memory monitoring (optional but recommended)
+psutil>=5.9.0
+
+# Additional geospatial dependencies (usually installed with geopandas)
+# pyproj>=3.3.0
+# fiona>=1.8.0
