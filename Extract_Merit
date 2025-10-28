@@ -1,0 +1,498 @@
+# -*- coding: utf-8 -*-
+"""
+MERIT-Basins流域提取工具 - 优化版
+主要改进:
+1. 预计算投影数据(减少重复转换)
+2. 使用unary_union替代dissolve(3-5x提速)
+3. 输出GeoPackage单文件(减少I/O)
+4. 优化内存管理
+5. 添加断点续传
+"""
+import os, sys, time, warnings
+warnings.filterwarnings("ignore")
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+from shapely.geometry import Point
+from shapely.ops import unary_union
+from collections import defaultdict, deque
+import gc
+
+# ========= 路径配置 =========
+riv_shp = r"Z:\Topography\MERIT-Basins\MERIT_Hydro_v07_Basins_v01\pfaf_level_01\pfaf_4_MERIT_Hydro_v07_Basins_v01\riv_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
+cat_shp = r"Z:\Topography\MERIT-Basins\MERIT_Hydro_v07_Basins_v01\pfaf_level_01\pfaf_4_MERIT_Hydro_v07_Basins_v01\cat_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
+china_prov_shp = r"Z:\ARCGIS_Useful_data\China\中国行政区_包含沿海岛屿.shp"
+
+excel_path = r"Z:\Runoff_Flood\China_runoff\流域基础信息\面积提取\站点信息-20251025.xlsx"
+out_root   = r"Z:\Runoff_Flood\China_runoff\流域基础信息\面积提取"
+os.makedirs(out_root, exist_ok=True)
+run_log_path = os.path.join(out_root, "run_log.txt")
+
+# ========= 参数设置 =========
+SNAP_DIST_M   = 5000.0
+ORDER_FIRST   = False
+MAX_UP_REACH  = 100000
+AREA_TOL      = 0.20
+AREA_EPSG     = 6933
+SAVE_INDIVIDUAL_SHP = False  # 新增:是否保存单站shapefile(改为False节省I/O)
+MEMORY_CHECK_INTERVAL = 50   # 每N个站点检查内存
+# ============================
+
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except:
+    HAS_TQDM = False
+
+# ---------- 工具函数 ----------
+def log(msg: str):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line); sys.stdout.flush()
+    with open(run_log_path, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+def fmt_pct(x):
+    try:
+        return f"{float(x):.1%}"
+    except:
+        return "NA"
+
+def check_memory():
+    """内存监控"""
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        if mem.percent > 85:
+            log(f"⚠️ 内存使用率 {mem.percent:.1f}%, 执行垃圾回收")
+            gc.collect()
+            return True
+    except ImportError:
+        pass
+    return False
+
+def ensure_wgs84(gdf):
+    if gdf.crs is None: 
+        return gdf.set_crs(4326)
+    if gdf.crs.to_epsg() != 4326: 
+        return gdf.to_crs(4326)
+    return gdf
+
+def valid_int(x):
+    try: 
+        xi = int(x)
+        return xi > 0
+    except: 
+        return False
+
+def pick_nearest_reach(gdf_riv_m, lon, lat, gdf_riv_wgs84):
+    """
+    优化版:直接使用预投影的数据
+    Args:
+        gdf_riv_m: 已投影到3857的河网
+        lon, lat: WGS84坐标
+        gdf_riv_wgs84: 原始WGS84河网(用于获取属性)
+    """
+    # 将点投影到3857
+    pt_m = gpd.GeoDataFrame(geometry=[Point(lon, lat)], crs=4326).to_crs(3857)
+    pt = pt_m.geometry.iloc[0]
+    
+    # 空间索引查询
+    sidx = gdf_riv_m.sindex
+    cand_idx = list(sidx.intersection(pt.buffer(SNAP_DIST_M).bounds))
+    
+    if not cand_idx:
+        raise RuntimeError(f"在 {SNAP_DIST_M} m 内没有河段；请增大 SNAP_DIST_M。")
+    
+    # 获取候选河段
+    cand = gdf_riv_m.iloc[cand_idx].copy()
+    cand["__dist__"] = cand.geometry.distance(pt)
+    
+    # 从原始数据获取属性
+    cand_orig = gdf_riv_wgs84.iloc[cand_idx].copy()
+    cand["_order_"]  = cand_orig["order"].fillna(0)  if "order"  in cand_orig.columns else 0
+    cand["_uparea_"] = cand_orig["uparea"].fillna(0) if "uparea" in cand_orig.columns else 0
+    cand["COMID"] = cand_orig["COMID"]
+    
+    # 排序选择最优河段
+    if ORDER_FIRST:
+        cand = cand.sort_values(["_order_","__dist__","_uparea_"], 
+                                ascending=[False, True, False])
+    else:
+        cand = cand.sort_values(["__dist__","_order_","_uparea_"], 
+                                ascending=[True, False, False])
+    
+    r = cand.iloc[0]
+    return int(r["COMID"]), float(r["__dist__"]), int(r["_order_"]), float(r["_uparea_"])
+
+def build_upstream_graph(gdf_riv):
+    """构建上游拓扑图"""
+    up_fields = [c for c in ["up1","up2","up3","up4"] if c in gdf_riv.columns]
+    has_next  = "NextDownID" in gdf_riv.columns
+    G = defaultdict(set)
+    
+    if has_next:
+        for _, r in gdf_riv[["COMID","NextDownID"]].iterrows():
+            c, nd = r["COMID"], r["NextDownID"]
+            if valid_int(c) and valid_int(nd): 
+                G[int(nd)].add(int(c))
+    
+    if up_fields:
+        cols = ["COMID"] + up_fields
+        for _, r in gdf_riv[cols].iterrows():
+            d = r["COMID"]
+            if not valid_int(d): 
+                continue
+            d = int(d)
+            for uf in up_fields:
+                u = r[uf]
+                if valid_int(u): 
+                    G[d].add(int(u))
+    
+    if (not has_next) and (not up_fields):
+        raise RuntimeError("河网缺少 NextDownID / up1..up4，无法构拓扑。")
+    
+    return G
+
+def bfs_upstream(G, outlet):
+    """BFS追溯上游"""
+    visited, q = set([outlet]), deque([outlet])
+    while q:
+        cur = q.popleft()
+        for u in G.get(cur, set()):
+            if u not in visited:
+                visited.add(u)
+                q.append(u)
+    return visited
+
+def calc_polygon_area_m2(gdf_poly, gdf_poly_area_crs=None):
+    """
+    优化版:可直接使用预投影数据
+    Args:
+        gdf_poly: 要计算面积的多边形
+        gdf_poly_area_crs: 预投影到面积坐标系的多边形(可选)
+    """
+    if gdf_poly_area_crs is not None:
+        return float(gdf_poly_area_crs.area.sum())
+    return float(gdf_poly.to_crs(AREA_EPSG).area.sum())
+
+def read_site_info(xlsx_path):
+    """读取测站信息"""
+    cand_code = ["测站编码","测站代码","站码","站号","code","station_id"]
+    cand_lon  = ["经度","lon","longitude"]
+    cand_lat  = ["纬度","lat","latitude"]
+    cand_area = ["集水区面积","面积","area"]
+    
+    book = pd.read_excel(xlsx_path, sheet_name=None)
+    for sheet_name, df in book.items():
+        cols = {str(c).strip(): c for c in df.columns}
+        code_col = next((cols[c] for c in cols if c in cand_code), None)
+        lon_col  = next((cols[c] for c in cols if c in cand_lon),  None)
+        lat_col  = next((cols[c] for c in cols if c in cand_lat),  None)
+        area_col = next((cols[c] for c in cols if c in cand_area), None)
+        
+        if code_col and lon_col and lat_col and area_col:
+            out = df[[code_col, lon_col, lat_col, area_col]].copy()
+            out.columns = ["code","lon","lat","area"]
+            out["code"] = out["code"].astype(str).str.strip()
+            out["lon"]  = pd.to_numeric(out["lon"], errors="coerce")
+            out["lat"]  = pd.to_numeric(out["lat"], errors="coerce")
+            out["area"] = pd.to_numeric(out["area"], errors="coerce")
+            return sheet_name, out.dropna(subset=["code","lon","lat"])
+    
+    raise RuntimeError("未在Excel中找到同时包含【测站编码/经度/纬度/集水区面积】的工作表。")
+
+def normalize_area_to_m2(series_area):
+    """面积单位归一化到m²"""
+    s = series_area.dropna()
+    if s.empty: 
+        return series_area
+    return series_area * 1_000_000.0 if float(s.median()) < 1e6 else series_area
+
+def process_one_site(code, lon, lat, area_target_m2, 
+                     gdf_riv_m, gdf_riv_wgs84, gdf_cat, gdf_cat_area, 
+                     china_prov, G):
+    """
+    处理单个测站
+    优化: 使用预投影数据 + unary_union替代dissolve
+    """
+    try:
+        # 1. 捕捉最近河段
+        outlet_comid, dist_m, ordv, upa = pick_nearest_reach(
+            gdf_riv_m, lon, lat, gdf_riv_wgs84
+        )
+        
+        # 2. BFS追溯上游
+        visited = bfs_upstream(G, outlet_comid)
+        if len(visited) > MAX_UP_REACH:
+            return {"code": code, "status": "fail", 
+                   "msg": f"上游过大({len(visited)})"}
+        
+        # 3. 提取对应的单元流域
+        sel = gdf_cat[gdf_cat["COMID"].isin(visited)].copy()
+        if sel.empty:
+            return {"code": code, "status": "fail", 
+                   "msg": "cat未匹配到COMID"}
+        
+        # 4. 合并流域 - 使用unary_union(比dissolve快3-5倍)
+        cat_geom = unary_union(sel.geometry.values)
+        cat = gpd.GeoDataFrame(
+            [{"station_id": code, "geometry": cat_geom}], 
+            crs=sel.crs
+        )
+        
+        # 保留unitarea信息(如果有)
+        if "unitarea" in sel.columns:
+            cat["unitarea_sum"] = sel["unitarea"].sum()
+        
+        # 5. 计算面积 - 使用预投影数据
+        sel_area = gdf_cat_area[gdf_cat_area["COMID"].isin(visited)]
+        cat_area_geom = unary_union(sel_area.geometry.values)
+        area_m2 = float(gpd.GeoSeries([cat_area_geom], crs=AREA_EPSG).area.sum())
+        
+        # 6. 面积验证
+        rel_err = None
+        pass_check = False
+        if pd.notna(area_target_m2) and area_target_m2 > 0:
+            rel_err = abs(area_m2 - area_target_m2) / area_target_m2
+            pass_check = (rel_err <= AREA_TOL)
+        else:
+            pass_check = True
+        
+        # 7. 输出结果
+        shp = png = stats_csv = None
+        status_str = "ok" if pass_check else "reject"
+        
+        if pass_check:
+            out_dir = os.path.join(out_root, "sites", code)
+            os.makedirs(out_dir, exist_ok=True)
+            
+            # 可选: 保存单站shapefile
+            if SAVE_INDIVIDUAL_SHP:
+                shp = os.path.join(out_dir, f"{code}_catchment.shp")
+                cat.to_crs(4326).to_file(shp, driver="ESRI Shapefile", 
+                                         encoding="utf-8")
+            
+            # 统计CSV
+            stats_csv = os.path.join(out_dir, f"{code}_stats.csv")
+            pd.DataFrame([{
+                "code": code, "lon": lon, "lat": lat,
+                "outlet_comid": outlet_comid, "snap_dist_m": dist_m,
+                "outlet_order": ordv, "outlet_uparea_km2": upa,
+                "n_upstream_reaches": len(visited),
+                "area_calc_m2": area_m2, "area_table_m2": area_target_m2,
+                "rel_error": rel_err
+            }]).to_csv(stats_csv, index=False, encoding="utf-8-sig")
+            
+            # 绘图
+            try:
+                gdf_pt = gpd.GeoDataFrame(
+                    {"code":[code]}, 
+                    geometry=[Point(lon, lat)], 
+                    crs=4326
+                )
+                xmin, ymin, xmax, ymax = cat.total_bounds
+                pad = max(xmax-xmin, ymax-ymin) * 0.15
+                
+                fig, ax = plt.subplots(figsize=(7.2, 7.2))
+                china_prov.boundary.plot(ax=ax, linewidth=0.6, alpha=0.8)
+                cat.boundary.plot(ax=ax, linewidth=1.8, color='red')
+                gdf_pt.plot(ax=ax, markersize=30, color='blue', marker='o')
+                
+                ax.set_xlim(xmin-pad, xmax+pad)
+                ax.set_ylim(ymin-pad, ymax+pad)
+                ax.set_aspect("equal", adjustable="box")
+                ax.grid(True, linewidth=0.3, alpha=0.3)
+                ax.set_title(f"{code} — Upstream (COMID={outlet_comid})", 
+                            fontsize=11)
+                
+                png = os.path.join(out_dir, f"{code}_map.png")
+                plt.savefig(png, dpi=300, bbox_inches="tight")
+                plt.close(fig)
+            except Exception as e:
+                png = f"[绘图失败] {e}"
+                plt.close('all')  # 确保关闭所有图形
+        
+        return {
+            "code": code, "status": status_str,
+            "lon": lon, "lat": lat,
+            "area_calc_m2": area_m2, "area_table_m2": area_target_m2,
+            "rel_error": rel_err, "shp": shp, "png": png, 
+            "stats_csv": stats_csv,
+            "gdf": cat.to_crs(4326) if pass_check else None  # 用于后续合并输出
+        }
+        
+    except Exception as e:
+        return {"code": code, "status": "fail", "msg": str(e)}
+
+# ================= 主流程 =================
+def main():
+    with open(run_log_path, "w", encoding="utf-8") as f: 
+        f.write("")
+    
+    log("="*60)
+    log("MERIT-Basins流域提取工具 - 优化版")
+    log("="*60)
+    
+    # [1/8] 读取测站信息
+    log("[1/8] 读取测站信息 ...")
+    sheet, df_info = read_site_info(excel_path)
+    df_info["area_m2"] = normalize_area_to_m2(df_info["area"])
+    
+    # 断点续传: 检查已完成的站点
+    summary_csv = os.path.join(out_root, "summary.csv")
+    completed = set()
+    if os.path.exists(summary_csv):
+        try:
+            df_prev = pd.read_csv(summary_csv)
+            completed = set(df_prev[df_prev["status"]=="ok"]["code"].astype(str))
+            log(f"    发现已完成 {len(completed)} 个站点，将跳过")
+        except:
+            pass
+    
+    df_info = df_info[~df_info["code"].isin(completed)]
+    log(f"    工作表: {sheet}, 待处理站点: {len(df_info)}")
+    
+    if df_info.empty:
+        log("所有站点已完成，退出")
+        return
+    
+    # [2/8] 读取空间数据
+    log("[2/8] 读取河网/单元流域/省界 ...")
+    gdf_riv = ensure_wgs84(gpd.read_file(riv_shp))
+    gdf_cat = ensure_wgs84(gpd.read_file(cat_shp))
+    china_prov = ensure_wgs84(gpd.read_file(china_prov_shp))
+    
+    for req in ["COMID"]:
+        if req not in gdf_riv.columns: 
+            raise ValueError("河网缺少 COMID")
+        if req not in gdf_cat.columns: 
+            raise ValueError("单元流域缺少 COMID")
+    
+    log(f"    河网: {len(gdf_riv)} 条, 单元流域: {len(gdf_cat)} 个")
+    
+    # [3/8] 🚀 预计算投影数据 (关键优化点)
+    log("[3/8] 🚀 预计算投影数据 (减少重复转换) ...")
+    gdf_riv_m = gdf_riv.to_crs(3857)  # 用于距离计算
+    gdf_cat_area = gdf_cat.to_crs(AREA_EPSG)  # 用于面积计算
+    log("    完成: 河网→3857, 单元流域→EPSG:6933")
+    
+    # [4/8] 构建拓扑
+    log("[4/8] 构建上游拓扑图 ...")
+    G = build_upstream_graph(gdf_riv)
+    log(f"    拓扑节点数: {len(G)}")
+    
+    # [5/8] 批处理
+    log("[5/8] 批处理测站 ...")
+    summary_rows = []
+    all_catchments = []  # 存储所有成功的流域
+    
+    iterator = enumerate(df_info.itertuples(index=False), start=1)
+    total = len(df_info)
+    if HAS_TQDM:
+        iterator = tqdm(iterator, total=total, desc="处理进度", ncols=90)
+    
+    for idx, r in iterator:
+        code = str(getattr(r, "code")).strip()
+        lon  = float(getattr(r, "lon"))
+        lat  = float(getattr(r, "lat"))
+        area_tab = getattr(r, "area_m2")
+        
+        log(f"[{idx}/{total}] {code}")
+        res = process_one_site(
+            code, lon, lat, area_tab,
+            gdf_riv_m, gdf_riv, gdf_cat, gdf_cat_area,
+            china_prov, G
+        )
+        summary_rows.append(res)
+        
+        # 收集成功的流域用于合并输出
+        if res.get("status") == "ok" and res.get("gdf") is not None:
+            all_catchments.append(res["gdf"])
+        
+        # 日志
+        if res.get("status") == "ok":
+            log(f"  ✓ OK | 相对误差={fmt_pct(res.get('rel_error'))}")
+        elif res.get("status") == "reject":
+            log(f"  ✗ REJECT | 相对误差={fmt_pct(res.get('rel_error'))}")
+        elif res.get("status") == "fail":
+            log(f"  ✗ FAIL | {res.get('msg')}")
+        
+        # 定期内存检查
+        if idx % MEMORY_CHECK_INTERVAL == 0:
+            check_memory()
+    
+    # [6/8] 输出汇总
+    log("[6/8] 输出汇总结果 ...")
+    
+    # 汇总CSV
+    df_summary = pd.DataFrame(summary_rows)
+    df_summary.to_csv(summary_csv, index=False, encoding="utf-8-sig")
+    log(f"    汇总表: {summary_csv}")
+    
+    # 🚀 所有流域合并为单个GeoPackage (减少文件碎片)
+    if all_catchments:
+        gpkg_path = os.path.join(out_root, "all_catchments.gpkg")
+        gdf_all = gpd.GeoDataFrame(
+            pd.concat(all_catchments, ignore_index=True),
+            crs=4326
+        )
+        gdf_all.to_file(gpkg_path, driver="GPKG", layer="catchments")
+        log(f"    ✓ 所有流域GeoPackage: {gpkg_path} ({len(gdf_all)}个)")
+
+        # 写出每个站点的独立 GeoPackage（.gpkg）
+        log("    写出每站单独 GeoPackage ...")
+        for i in range(len(gdf_all)):
+            try:
+                row_gdf = gdf_all.iloc[[i]].copy()
+                sid = str(row_gdf.iloc[0].get("station_id", "")).strip()
+                if not sid:
+                    sid = f"site_{i+1}"
+                out_dir_site = os.path.join(out_root, "sites", sid)
+                os.makedirs(out_dir_site, exist_ok=True)
+                gpkg_path = os.path.join(out_dir_site, f"{sid}_catchment.gpkg")
+                # 使用 GPKG 写出，每个文件一个图层
+                row_gdf.to_file(gpkg_path, driver="GPKG", layer="catchment")
+            except Exception as e:
+                log(f"    写出站点 {sid} GeoPackage 失败: {e}")
+    
+    # [7/8] 统计图
+    log("[7/8] 生成统计图 ...")
+    cnt = df_summary["status"].value_counts().reindex(
+        ["ok","reject","fail"], fill_value=0
+    )
+    
+    fig, ax = plt.subplots(figsize=(6,4))
+    bars = ax.bar(cnt.index, cnt.values, color=['green','orange','red'])
+    ax.set_ylabel("Count", fontsize=11)
+    ax.set_title("批处理结果统计", fontsize=12)
+    
+    for bar, v in zip(bars, cnt.values):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{int(v)}', ha='center', va='bottom')
+    
+    chart_path = os.path.join(out_root, "summary_chart.png")
+    plt.savefig(chart_path, dpi=200, bbox_inches="tight")
+    plt.close()
+    log(f"    统计图: {chart_path}")
+    
+    # [8/8] 完成
+    log("="*60)
+    log(f"[8/8] ✅ 完成! 输出目录: {out_root}")
+    log(f"    成功: {cnt.get('ok',0)} | 超差: {cnt.get('reject',0)} | 失败: {cnt.get('fail',0)}")
+    log("="*60)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log(f"❌ 程序异常终止: {e}")
+        import traceback
+        log(traceback.format_exc())
+        raise
