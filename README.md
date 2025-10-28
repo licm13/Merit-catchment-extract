@@ -26,6 +26,7 @@ An optimized Python tool for extracting watersheds from MERIT-Basins hydrologica
   - Preserves real features (lakes > 1 km²) while removing artifacts
 - **High Performance**: 3-5x faster than traditional dissolve operations using `unary_union`
 - **Pre-computed Projections**: Reduces redundant coordinate transformations
+- **Indexed Catchment Lookup** 🚀 **NEW**: Reuses COMID indices to avoid full-table scans during batch processing
 - **Memory Efficient**: Built-in memory monitoring and garbage collection
 - **Resume Capability**: Automatically skips completed stations
 - **Batch Processing**: Process multiple stations with progress tracking
@@ -64,6 +65,16 @@ Three-stage robust merging process:
 - Accuracy gain far exceeds performance cost
 
 See [Technical Documentation](#topology-fix-technical-details) for implementation details.
+
+### ⚡ Latest Performance Improvements
+
+| Optimization | Benefit |
+| --- | --- |
+| Pre-built CRS transformer for station snapping | Eliminates per-site GeoDataFrame creation when projecting station coordinates |
+| COMID-indexed catchment lookup | Avoids repeated `isin` scans and speeds up upstream catchment assembly, especially for large networks |
+| Direct equal-area summation | Skips expensive union operations for area validation while retaining accuracy |
+
+These refinements keep per-station processing consistent even when handling thousands of upstream unit catchments.
 
 ### Prerequisites
 
