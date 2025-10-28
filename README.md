@@ -1,5 +1,13 @@
 # MERIT-Basins Watershed Extraction Tool
 
+> 🌊 A high-performance Python tool for automated watershed delineation from MERIT-Basins hydrological dataset with topology-aware merging and robust error handling.
+
+[![Python Version](https://img.shields.io/badge/python-3.7%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MERIT-Basins](https://img.shields.io/badge/Dataset-MERIT--Basins-green.svg)](http://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Basins/)
+
+**简介**: 基于MERIT-Basins水文数据集的高性能流域自动提取工具，具有拓扑感知合并和健壮的错误处理功能。
+
 [中文](#中文说明) | [English](#english)
 
 ---
@@ -65,9 +73,24 @@ Python 3.7+
 
 ### Installation
 
+**Option 1: Install as a package (Recommended)**
+
+```bash
+git clone https://github.com/licm13/Merit-catchment-extract.git
+cd Merit-catchment-extract
+pip install -e .
+```
+
+After installation, you can run the tool from anywhere:
+```bash
+extract-merit
+```
+
+**Option 2: Manual setup**
+
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/Merit-catchment-extract.git
+git clone https://github.com/licm13/Merit-catchment-extract.git
 cd Merit-catchment-extract
 ```
 
@@ -104,8 +127,20 @@ memory_check_interval: 50    # Check memory every N stations
 
 ### Usage
 
+**Option 1: Command-line tool (if installed as package)**
 ```bash
-python Extract_Merit
+extract-merit
+```
+
+**Option 2: Direct Python script execution**
+```bash
+python extract_merit_catchment.py
+```
+
+**Option 3: Make executable (Linux/Mac)**
+```bash
+chmod +x extract_merit_catchment.py
+./extract_merit_catchment.py
 ```
 
 The tool will:
@@ -381,9 +416,24 @@ Python 3.7+
 
 ### 安装步骤
 
+**方式1: 作为包安装（推荐）**
+
+```bash
+git clone https://github.com/licm13/Merit-catchment-extract.git
+cd Merit-catchment-extract
+pip install -e .
+```
+
+安装后，可以在任何位置运行工具:
+```bash
+extract-merit
+```
+
+**方式2: 手动配置**
+
 1. 克隆仓库:
 ```bash
-git clone https://github.com/yourusername/Merit-catchment-extract.git
+git clone https://github.com/licm13/Merit-catchment-extract.git
 cd Merit-catchment-extract
 ```
 
@@ -420,8 +470,20 @@ memory_check_interval: 50    # 每N个测站检查内存
 
 ### 使用方法
 
+**方式1: 命令行工具（如果已作为包安装）**
 ```bash
-python Extract_Merit
+extract-merit
+```
+
+**方式2: 直接运行Python脚本**
+```bash
+python extract_merit_catchment.py
+```
+
+**方式3: 可执行方式 (Linux/Mac)**
+```bash
+chmod +x extract_merit_catchment.py
+./extract_merit_catchment.py
 ```
 
 工具将执行以下步骤:
