@@ -1,0 +1,41 @@
+# MERIT-Basins Watershed Extraction Tool Configuration
+# Copy this file to config.yaml and update the paths for your system
+
+# ========= Input Data Paths =========
+# Path to MERIT-Basins river network shapefile
+riv_shp: "Z:/Topography/MERIT-Basins/MERIT_Hydro_v07_Basins_v01/pfaf_level_01/pfaf_4_MERIT_Hydro_v07_Basins_v01/riv_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
+
+# Path to MERIT-Basins catchment shapefile
+cat_shp: "Z:/Topography/MERIT-Basins/MERIT_Hydro_v07_Basins_v01/pfaf_level_01/pfaf_4_MERIT_Hydro_v07_Basins_v01/cat_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
+
+# Path to province boundary shapefile (for visualization)
+china_prov_shp: "Z:/ARCGIS_Useful_data/China/中国行政区_包含沿海岛屿.shp"
+
+# Path to Excel file with station information
+excel_path: "Z:/Runoff_Flood/China_runoff/流域基础信息/面积提取/站点信息-20251025.xlsx"
+
+# Output directory for results
+out_root: "Z:/Runoff_Flood/China_runoff/流域基础信息/面积提取"
+
+# ========= Processing Parameters =========
+# Maximum snapping distance in meters (default: 5000.0)
+snap_dist_m: 5000.0
+
+# Prioritize stream order over distance when selecting nearest reach (default: false)
+order_first: false
+
+# Maximum number of upstream reaches to process (default: 100000)
+max_up_reach: 100000
+
+# Area tolerance for validation (0.20 = 20% difference allowed)
+area_tol: 0.20
+
+# EPSG code for area calculations (6933 = World Cylindrical Equal Area)
+area_epsg: 6933
+
+# Save individual shapefiles in addition to GeoPackage (default: false)
+# Setting to false reduces I/O overhead
+save_individual_shp: false
+
+# Check memory usage every N stations (default: 50)
+memory_check_interval: 50
