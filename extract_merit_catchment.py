@@ -166,8 +166,8 @@ def load_config() -> Dict[str, Any]:
         'riv_shp': r"Z:\Topography\MERIT-Basins\MERIT_Hydro_v07_Basins_v01\pfaf_level_01\pfaf_4_MERIT_Hydro_v07_Basins_v01\riv_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp",
         'cat_shp': r"Z:\Topography\MERIT-Basins\MERIT_Hydro_v07_Basins_v01\pfaf_level_01\pfaf_4_MERIT_Hydro_v07_Basins_v01\cat_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp",
         'china_prov_shp': r"Z:\ARCGIS_Useful_data\China\中国行政区_包含沿海岛屿.shp",
-        'excel_path': r"Z:\Runoff_Flood\China_runoff\流域基础信息\面积提取\站点信息-20251025.xlsx",
-        'out_root': r"Z:\Runoff_Flood\China_runoff\流域基础信息\面积提取",
+        'excel_path': r"Z:\Runoff_Flood\China_runoff\流域基础信息\水文站信息.xlsx",
+        'out_root': r"Z:\Runoff_Flood\China_runoff\流域基础信息\流域面积",
 
         # ========= 算法参数配置 =========
         'snap_dist_m': DEFAULT_SNAP_DISTANCE_M,  # 捕捉距离
