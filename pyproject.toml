@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "merit-watershed-extractor"
-version = "2.2.0"
-description = "A high-performance Python tool for automated watershed delineation from MERIT-Basins hydrological dataset"
+version = "3.0.0"
+description = "A high-performance Python tool for automated watershed delineation from MERIT-Basins hydrological dataset with topology-aware merging"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -52,11 +52,12 @@ Repository = "https://github.com/licm13/Merit-catchment-extract"
 Issues = "https://github.com/licm13/Merit-catchment-extract/issues"
 
 [project.scripts]
-extract-merit = "extract_merit_catchment:main"
+extract-merit = "merit_extractor.cli:cli_main"
 
 [tool.setuptools]
-py-modules = ["extract_merit_catchment"]
+packages = ["merit_extractor"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["extract_merit_catchment*"]
+include = ["merit_extractor*"]
+exclude = ["tests*", "docs*"]
