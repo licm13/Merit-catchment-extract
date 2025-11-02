@@ -1,41 +1,60 @@
-# MERIT-Basins Watershed Extraction Tool Configuration
-# Copy this file to config.yaml and update the paths for your system
+# ====================================================================
+# MERIT-Basins Watershed Extractor 配置文件示例
+# MERIT-Basins Watershed Extractor Configuration Example
+# ====================================================================
+#
+# 使用说明 (Usage):
+#   1. 将本文件复制为 config.yaml
+#   2. 修改下面的路径为你的实际数据路径
+#   3. 根据需要调整算法参数
+#
+# 注意事项 (Notes):
+#   - Windows路径请使用正斜杠(/)或双反斜杠(\\)
+#   - 建议使用绝对路径避免相对路径问题
+#   - 路径中避免使用中文或特殊字符
+#
+# ====================================================================
 
-# ========= Input Data Paths =========
-# Path to MERIT-Basins river network shapefile
-riv_shp: "Z:/Topography/MERIT-Basins/MERIT_Hydro_v07_Basins_v01/pfaf_level_01/pfaf_4_MERIT_Hydro_v07_Basins_v01/riv_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
+# ========== 输入数据路径配置 (Input Data Paths) ==========
 
-# Path to MERIT-Basins catchment shapefile
-cat_shp: "Z:/Topography/MERIT-Basins/MERIT_Hydro_v07_Basins_v01/pfaf_level_01/pfaf_4_MERIT_Hydro_v07_Basins_v01/cat_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
+# 河网Shapefile路径
+riv_shp: "/path/to/riv_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
 
-# Path to province boundary shapefile (for visualization)
-china_prov_shp: "Z:/ARCGIS_Useful_data/China/中国行政区_包含沿海岛屿.shp"
+# 单元流域Shapefile路径
+cat_shp: "/path/to/cat_pfaf_4_MERIT_Hydro_v07_Basins_v01.shp"
 
-# Path to Excel file with station information
-excel_path: "Z:/Runoff_Flood/China_runoff/流域基础信息/面积提取/站点信息-20251025.xlsx"
+# 省界/边界Shapefile路径 (可选)
+china_prov_shp: "/path/to/china_provinces.shp"
 
-# Output directory for results
-out_root: "Z:/Runoff_Flood/China_runoff/流域基础信息/面积提取"
+# 测站信息Excel路径
+excel_path: "/path/to/station_info.xlsx"
 
-# ========= Processing Parameters =========
-# Maximum snapping distance in meters (default: 5000.0)
+# ========== 输出配置 (Output Configuration) ==========
+
+# 输出根目录
+out_root: "/path/to/output"
+
+# ========== 算法参数配置 (Algorithm Parameters) ==========
+
+# 捕捉距离 (米)
 snap_dist_m: 5000.0
 
-# Prioritize stream order over distance when selecting nearest reach (default: false)
+# 河流等级优先
 order_first: false
 
-# Maximum number of upstream reaches to process (default: 100000)
+# 最大上游河段数限制
 max_up_reach: 100000
 
-# Area tolerance for validation (0.20 = 20% difference allowed)
+# 面积相对误差容忍度
 area_tol: 0.20
 
-# EPSG code for area calculations (6933 = World Cylindrical Equal Area)
+# 面积计算投影坐标系
 area_epsg: 6933
 
-# Save individual shapefiles in addition to GeoPackage (default: false)
-# Setting to false reduces I/O overhead
+# ========== 输出选项 (Output Options) ==========
+
+# 是否保存单站Shapefile
 save_individual_shp: false
 
-# Check memory usage every N stations (default: 50)
+# 内存检查间隔
 memory_check_interval: 50
