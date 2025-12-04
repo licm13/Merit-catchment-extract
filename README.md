@@ -66,6 +66,14 @@ Three-stage robust merging process:
 
 See [Technical Documentation](#topology-fix-technical-details) for implementation details.
 
+### 📚 Documentation
+
+| Resource | Description |
+|----------|-------------|
+| [Tutorial for Beginners](examples/tutorial_freshman_basics.ipynb) | Jupyter notebook explaining core algorithms for freshmen students |
+| [Advanced Guide](docs/advanced_guide.md) | Algorithm flowcharts, parameter tuning, and complex scenarios |
+| [Examples](examples/README.md) | Sample code and usage examples |
+
 ### ⚡ Latest Performance Improvements
 
 | Optimization | Benefit |
@@ -418,6 +426,14 @@ MERIT-Basins的单元流域边界之间经常存在微小间隙（几个像素�
 - 精度提升远超性能成本
 
 详见[技术文档](#拓扑修复技术细节)了解实现详情。
+
+### 📚 文档资源
+
+| 资源 | 说明 |
+|------|------|
+| [新生教程](examples/tutorial_freshman_basics.ipynb) | 面向初学者的 Jupyter Notebook，图解核心算法 |
+| [高级指南](docs/advanced_guide.md) | 算法流程图解、参数调优、复杂场景解决方案 |
+| [示例](examples/README.md) | 示例代码和使用说明 |
 
 ### 系统要求
 
