@@ -287,14 +287,13 @@ class TestGeometryMerging(unittest.TestCase):
         """Test that large holes (representing lakes) are preserved."""
         # Outer square with a large inner hole (lake)
         outer = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
-        # Inner hole representing a 2x2 lake (4 km² if coordinates are in degrees scaled)
+        # Inner hole representing a 2x2 unit square
         hole = Polygon([(4, 4), (6, 4), (6, 6), (4, 6)])
         polygon_with_lake = Polygon(outer.exterior.coords, [hole.exterior.coords])
         
-        # Remove small holes should keep this large hole
-        # Note: The remove_small_holes function works in degrees, and 1 degree² ≈ 10000 km²
-        # So a 4 unit² hole in "degree coordinates" would be 4 * 10000 = 40000 km²
-        # We need to set min_hole_km2 appropriately
+        # The remove_small_holes function converts km² to degree² using:
+        # min_area_deg2 = min_area_km2 / 10000.0 (approximate conversion)
+        # A 4 unit² hole would need min_hole_km2 < 40000 to be preserved
         result = remove_small_holes(polygon_with_lake, min_area_km2=30000)
         
         # Should still have the interior hole
@@ -305,16 +304,15 @@ class TestGeometryMerging(unittest.TestCase):
         """Test that small holes (artifacts) are removed."""
         # Outer square with a tiny inner hole (artifact)
         outer = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
-        # Tiny hole (0.001 x 0.001 = 0.000001 units², which is very small)
-        # In degree coordinates, this is about 0.01 km² (much less than 1 km² threshold)
+        # Tiny hole: 0.001 x 0.001 = 0.000001 unit² (in coordinate units)
+        # Using the function's conversion (1 km² ≈ 0.0001 degree²), this is ~0.01 km²
         tiny_hole = Polygon([(4.9995, 4.9995), (5.0005, 4.9995), (5.0005, 5.0005), (4.9995, 5.0005)])
         polygon_with_artifact = Polygon(outer.exterior.coords, [tiny_hole.exterior.coords])
         
-        # Remove holes smaller than 1 km² 
-        # The tiny hole is ~0.01 km² which should be removed
+        # Remove holes smaller than 1 km² (threshold converts to 0.0001 degree²)
         result = remove_small_holes(polygon_with_artifact, min_area_km2=1.0)
         
-        # Tiny hole should be removed
+        # Tiny hole should be removed since its area is below threshold
         if isinstance(result, Polygon):
             self.assertEqual(len(result.interiors), 0, "Tiny artifact hole should be removed")
 
