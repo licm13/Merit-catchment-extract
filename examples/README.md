@@ -4,7 +4,19 @@
 
 ## 文件列表
 
-### 1. sample_station_info.xlsx
+### 1. tutorial_freshman_basics.ipynb 🆕
+面向大一新生的 Jupyter Notebook 教程，通俗解释以下核心概念：
+- **图论基础**: 河流如何在计算机中表示为有向图
+- **BFS 算法**: 如何追溯上游河网
+- **缓冲技巧**: 如何修复拓扑缝隙
+- 包含可视化和练习题
+
+**运行**:
+```bash
+jupyter notebook tutorial_freshman_basics.ipynb
+```
+
+### 2. sample_station_info.xlsx
 最小化的Excel示例文件,展示测站信息的标准格式。
 
 **包含字段**:

@@ -54,9 +54,6 @@ Issues = "https://github.com/licm13/Merit-catchment-extract/issues"
 [project.scripts]
 extract-merit = "merit_extractor.cli:cli_main"
 
-[tool.setuptools]
-packages = ["merit_extractor"]
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["merit_extractor*"]
